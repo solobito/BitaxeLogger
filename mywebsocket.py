@@ -14,7 +14,7 @@ import argparse
 import sys
 import datetime
 import sqlite3
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 
 info = "/api/system/info"
 bitaxe_ip = "192.168.1.233"
