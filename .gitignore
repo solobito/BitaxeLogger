@@ -1,5 +1,7 @@
 .DS_store
 node_modules
 .env
+.venv
 .sass-cache
 logs
+db

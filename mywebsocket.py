@@ -13,10 +13,13 @@ import os
 import argparse
 import sys
 import datetime
+import sqlite3
+from urllib.error import HTTPError
 
 info = "/api/system/info"
 bitaxe_ip = "192.168.1.233"
-logs_folder = "./logs"
+logs_folder = "./db"
+db_name = "./db/bitaxe_database.db"
 http_window_seconds = 5
 
 start_time = time.strftime("%Y-%m-%d_%H-%M-%S")
@@ -28,46 +31,57 @@ def on_message(ws, message):
     msg = "### new ws message ###"
     print(msg)
     print(message)
-    write_log(msg,ws_output_file)
-    write_log(message,ws_output_file)
+    write_ws_log(msg,ws_output_file)
+    write_ws_log(message,ws_output_file)
     
 def on_error(ws, error):
     msg = "### ws ERROR ###"
     print(f"{msg} error={error}")
-    write_log(f"{msg} error={error}",ws_output_file)
+    write_ws_log(f"{msg} error={error}",ws_output_file)
 
 def on_close(ws, close_status_code, close_msg):
     msg = "### ws closed ###"
     print(msg)
-    write_log(msg,ws_output_file)
+    write_ws_log(msg,ws_output_file)
     print ("Retry : %s" % time.ctime())
-    write_log("Retry : %s" % time.ctime(),ws_output_file)
+    write_ws_log("Retry : %s" % time.ctime(),ws_output_file)
     time.sleep(20)
     connect_ws() # retry per 20 seconds
 
 def on_open(ws):
     msg = "### Opened ws connection ###"
     print(msg)
-    write_log(msg,ws_output_file)
+    write_ws_log(msg,ws_output_file)
 
 def get_info():
     msg = "### HTTP Info ###"
     while True:
         try:
-            contents = urllib.request.urlopen("http://" + bitaxe_ip + info).read()
-        except:
-            print("Ups! something went wrong! Disconnected?")
-            os._exit(1)
-        
-        j = json.loads(contents)
-        print(msg)
-        for key in j.keys():
-            text = f" {key}: {j[key]}"
-            print(text)
-            if(key=="uptimeSeconds"):
-                print(f" UPTIME (, hh:mm:ss): {str(datetime.timedelta(seconds=j[key]))}")
-            write_log(text, info_output_file)
-
+            contents = urllib.request.urlopen("http://" + bitaxe_ip + info, timeout=5).read()
+        except HTTPError as error:
+            print('HTTP Error: Data of %s not retrieved because %s\nURL: %s', name, error, url)
+        except URLError as error:
+            if isinstance(error.reason, timeout):
+                print('Timeout Error: Data of %s not retrieved because %s\nURL: %s', name, error, url)
+            else:
+                print('URL Error: Data of %s not retrieved because %s\nURL: %s', name, error, url)
+        else:
+            print('\n### NEW INFO MSG ###')
+            j = json.loads(contents)
+            current_time = time.strftime("%Y-%m-%d %H:%M:%S")
+            print(f" {current_time}")
+            info_str = f"INSERT INTO stats VALUES ('{current_time}', "
+            
+            for key in j.keys():
+                info_str += f"'{j[key]}', "
+                print(f"  {key}: {j[key]}")
+                if(key=="uptimeSeconds"):
+                    info_str += f"'{str(datetime.timedelta(seconds=j[key]))}', "
+                    print(f"  UPTIME: {str(datetime.timedelta(seconds=j[key]))}")
+                    
+            info_str = info_str[:-2] + ");"
+            query_sqlite(info_str,db_name)
+            
         time.sleep(http_window_seconds)
     
 def connect_ws():
@@ -79,12 +93,68 @@ def connect_ws():
                               on_close=on_close)
     ws.run_forever(reconnect=10)
 
-def write_log(output, file_name):
+def write_ws_log(output, file_name):
     current_time = time.strftime("%Y-%m-%d %H:%M:%S")
     fp = open(file_name, "a")
     fp.write(f"{current_time}: {output}")
     fp.write("\n")
     fp.close()
+    
+def create_sqlite_table(table_name,db_name):
+
+    connection_obj = sqlite3.connect(db_name)
+    cursor_obj = connection_obj.cursor()
+ 
+    # Drop the GEEK table if already exists.
+    # cursor_obj.execute("DROP TABLE IF EXISTS GEEK")
+ 
+    table = " CREATE TABLE if not exists " + table_name + \
+                 " ("                       \
+                 "datetime TEXT, "           \
+                 "power DOUBLE, "           \
+                 "voltage DOUBLE, "         \
+                 "current DOUBLE, "         \
+                 "fanSpeedRpm INT, "        \
+                 "temp INT, "               \
+                 "hashRate DOUBLE, "        \
+                 "bestDiff TEXT, "          \
+                 "bestSessionDiff TEXT, "   \
+                 "freeHeap INT, "           \
+                 "coreVoltage INT, "        \
+                 "coreVoltageActual INT, "  \
+                 "frequency DOUBLE, "       \
+                 "ssid TEXT, "              \
+                 "hostname TEXT, "          \
+                 "wifiStatus TEXT, "        \
+                 "sharesAccepted INT, "     \
+                 "sharesRejected INT, "     \
+                 "uptimeSeconds INT, "      \
+                 "uptimeHuman TEXT, "       \
+                 "ASICModel TEXT, "         \
+                 "stratumURL TEXT, "        \
+                 "stratumPort INT, "        \
+                 "stratumUser TEXT, "       \
+                 "version TEXT, "           \
+                 "boardVersion TEXT, "      \
+                 "runningPartition TEXT, "  \
+                 "flipscreen INT, "         \
+                 "invertscreen INT, "       \
+                 "invertfanpolarity INT, "  \
+                 "autofanspeed INT, "       \
+                 "fanspeed INT "            \
+                "); "
+                
+    cursor_obj.execute(table)
+    connection_obj.close()
+    
+def query_sqlite(query,db_name):
+
+    conn = sqlite3.connect(db_name) 
+    cursor = conn.cursor() 
+  
+    cursor.execute(query) 
+    conn.commit() 
+    conn.close()
     
 def check_log_folder():
 
@@ -105,6 +175,7 @@ if __name__ == "__main__":
         sys.exit(0)
         
     check_log_folder()
+    create_sqlite_table("stats","./db/bitaxe_database.db")
 
     thread_info = threading.Thread(target=get_info, args=())
     thread_info.start()
@@ -115,4 +186,5 @@ if __name__ == "__main__":
         connect_ws()
         print("WS END!")
         sys.exit(1)
+        
 
