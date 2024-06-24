@@ -15,6 +15,7 @@ import sys
 import datetime
 import sqlite3
 from urllib.error import HTTPError, URLError
+from socket import timeout
 
 info = "/api/system/info"
 bitaxe_ip = "192.168.1.233"
@@ -55,16 +56,18 @@ def on_open(ws):
 
 def get_info():
     msg = "### HTTP Info ###"
+    url = "http://" + bitaxe_ip + info
+    name = 'get_info'
     while True:
         try:
-            contents = urllib.request.urlopen("http://" + bitaxe_ip + info, timeout=5).read()
+            contents = urllib.request.urlopen(url, timeout=5).read()
         except HTTPError as error:
-            print('HTTP Error: Data of %s not retrieved because %s\nURL: %s', name, error, url)
+            print(f'HTTP Error: Data of {name} not retrieved because {error}\nURL: {url}')
         except URLError as error:
             if isinstance(error.reason, timeout):
-                print('Timeout Error: Data of %s not retrieved because %s\nURL: %s', name, error, url)
+                print(f'Timeout Error: Data of {name} not retrieved because {error}\nURL: {url}')
             else:
-                print('URL Error: Data of %s not retrieved because %s\nURL: %s', name, error, url)
+                print(f'URL Error: Data of {name} not retrieved because {error}\nURL: {url}')
         else:
             print('\n### NEW INFO MSG ###')
             j = json.loads(contents)
