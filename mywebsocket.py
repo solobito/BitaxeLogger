@@ -58,6 +58,8 @@ def get_info():
     msg = "### HTTP Info ###"
     url = "http://" + bitaxe_ip + info
     name = 'get_info'
+    rows = []
+    
     while True:
         try:
             contents = urllib.request.urlopen(url, timeout=5).read()
@@ -73,17 +75,27 @@ def get_info():
             j = json.loads(contents)
             current_time = time.strftime("%Y-%m-%d %H:%M:%S")
             print(f" {current_time}")
-            info_str = f"INSERT INTO stats VALUES ('{current_time}', "
-            
-            for key in j.keys():
-                info_str += f"'{j[key]}', "
+                    
+            for key, value in j.items():
+                rows.append(f"{value}")
                 print(f"  {key}: {j[key]}")
                 if(key=="uptimeSeconds"):
-                    info_str += f"'{str(datetime.timedelta(seconds=j[key]))}', "
                     print(f"  UPTIME: {str(datetime.timedelta(seconds=j[key]))}")
-                    
-            info_str = info_str[:-2] + ");"
-            query_sqlite(info_str,db_name)
+            
+            create_sqlite_table("stats",db_name,j)
+            
+            keys = ', '.join(j.keys())
+            question_marks = ', '.join(['?'] * len(j))
+            insert_query = f"INSERT INTO stats ({keys}) VALUES ({question_marks})"
+            
+            
+            conn = sqlite3.connect(db_name) 
+            cursor = conn.cursor() 
+            
+            cursor.execute(insert_query, list(j.values()))
+
+            conn.commit() 
+            conn.close()
             
         time.sleep(http_window_seconds)
     
@@ -103,59 +115,31 @@ def write_ws_log(output, file_name):
     fp.write("\n")
     fp.close()
     
-def create_sqlite_table(table_name,db_name):
-
-    connection_obj = sqlite3.connect(db_name)
-    cursor_obj = connection_obj.cursor()
- 
-    # Drop the GEEK table if already exists.
-    # cursor_obj.execute("DROP TABLE IF EXISTS GEEK")
- 
-    table = " CREATE TABLE if not exists " + table_name + \
-                 " ("                       \
-                 "datetime TEXT, "           \
-                 "power DOUBLE, "           \
-                 "voltage DOUBLE, "         \
-                 "current DOUBLE, "         \
-                 "fanSpeedRpm INT, "        \
-                 "temp INT, "               \
-                 "hashRate DOUBLE, "        \
-                 "bestDiff TEXT, "          \
-                 "bestSessionDiff TEXT, "   \
-                 "freeHeap INT, "           \
-                 "coreVoltage INT, "        \
-                 "coreVoltageActual INT, "  \
-                 "frequency DOUBLE, "       \
-                 "ssid TEXT, "              \
-                 "hostname TEXT, "          \
-                 "wifiStatus TEXT, "        \
-                 "sharesAccepted INT, "     \
-                 "sharesRejected INT, "     \
-                 "uptimeSeconds INT, "      \
-                 "uptimeHuman TEXT, "       \
-                 "ASICModel TEXT, "         \
-                 "stratumURL TEXT, "        \
-                 "stratumPort INT, "        \
-                 "stratumUser TEXT, "       \
-                 "version TEXT, "           \
-                 "boardVersion TEXT, "      \
-                 "runningPartition TEXT, "  \
-                 "flipscreen INT, "         \
-                 "invertscreen INT, "       \
-                 "invertfanpolarity INT, "  \
-                 "autofanspeed INT, "       \
-                 "fanspeed INT "            \
-                "); "
-                
-    cursor_obj.execute(table)
-    connection_obj.close()
+def get_sqlite_type(value):
+    if isinstance(value, int):
+        return 'INT'
+    elif isinstance(value, float):
+        return 'DOUBLE'
+    elif isinstance(value, bool):
+        return 'INT'
+    elif isinstance(value, str):
+        return 'TEXT'
+    else:
+        return 'TEXT'
     
-def query_sqlite(query,db_name):
+def create_sqlite_table(table_name,db_name,j):
 
-    conn = sqlite3.connect(db_name) 
-    cursor = conn.cursor() 
-  
-    cursor.execute(query) 
+    conn = sqlite3.connect(db_name)
+    cursor = conn.cursor()
+    
+    columns = []
+    
+    for key, value in j.items():
+        columns.append(f"{key} {get_sqlite_type(value)}")
+        
+    create_table_query = f"CREATE TABLE if not exists {table_name} ({', '.join(columns)});"
+                
+    cursor.execute(create_table_query)
     conn.commit() 
     conn.close()
     
@@ -178,7 +162,6 @@ if __name__ == "__main__":
         sys.exit(0)
         
     check_log_folder()
-    create_sqlite_table("stats","./db/bitaxe_database.db")
 
     thread_info = threading.Thread(target=get_info, args=())
     thread_info.start()
